@@ -104,5 +104,9 @@ USER "$user"
 # It also ensures Composer is not needed at runtime in production.
 RUN composer install --no-dev --optimize-autoloader && rm -rf /home/"$user"/.composer
 
+# Cache Laravel config, routes, views, and events at build time.
+# Since .env.prod is already copied above, real values are used — no dummy vars needed.
+RUN php artisan optimize
+
 # The USER, ENTRYPOINT, and CMD are inherited from the 'base_php_fpm' stage.
 # No need to redefine them here unless you want different behavior specifically for production.

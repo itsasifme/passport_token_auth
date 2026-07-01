@@ -7,15 +7,11 @@ services:
         uid: 1412
       context: .
       dockerfile: /docker/php-fpm/Dockerfile
-      target: base_php_fpm 
+      target: production 
     volumes:
-      - ./src:/var/www/
-      - ./src/.env.local:/var/www/.env
       - app_supervisor_logs:/var/www/storage/logs/supervisor
-    expose:
-      - "9000"
-    env_file:
-      - ./src/.env.local
+    ports:
+      - "8080:80"
     environment:
       - APP_ENV=local
     working_dir: /var/www/
@@ -29,15 +25,12 @@ services:
       build:
         context: .
         dockerfile: ./docker/nginx/Dockerfile
-        target: base_nginx
+        target: production
       environment:
         - NGINX_HOST=app
         - NGINX_PORT=9000
       ports:
         - "8000:80"
-      volumes:
-        # Keep your source code mount for local development sync
-        - ./src:/var/www/
       depends_on:
         - app  
       restart: unless-stopped

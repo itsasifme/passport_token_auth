@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: C:\ProgramData\chocolatey\lib\kubernetes-kompose\tools\kompose.exe convert -f docker-compose.yml -o k8s/local/
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: app
+  name: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: app
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: app
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z -w 2 mysql 3306; do echo waiting for mysql; sleep 2; done;']
+      containers:
+        - name: app
+          image: passport_token_auth-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /var/www/.env
+              name: app-cm1
+              subPath: .env
+            - mountPath: /var/www/storage/logs/supervisor
+              name: app-supervisor-logs
+          workingDir: /var/www/
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            items:
+              - key: .env.local
+                path: .env
+            name: app-cm1
+          name: app-cm1
+        - name: app-supervisor-logs
+          persistentVolumeClaim:
+            claimName: app-supervisor-logs

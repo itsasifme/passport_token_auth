@@ -32,21 +32,20 @@ fi
 
 # Composer install
 if [ "$APP_ENV" = "production" ] || [ "$APP_ENV" = "staging" ]; then
-  echo "Skipping Composer install at runtime for production/staging."
-  # If you have any production-specific setup that needs to run once, put it here.
+  echo "Skipping Composer install and any type of command execution at runtime for production/staging."
+  # If you have any staging/production-specific setup that needs to run once, put it into staging/production Dockerfile.
+else
+  echo "Installing Composer dependencies for development..."
+  composer install
+
+  # If you have any development-specific setup that needs to run when container boot up, put it here.
   # For example:
   # php artisan optimize
   # php artisan config:cache
   # php artisan route:cache
   # php artisan view:cache
   # php artisan event:cache
-  # php artisan migrate --force
-else
-  echo "Installing Composer dependencies for development..."
-  composer install
-
-  # You might also want to run migrations here for development
-  # php artisan migrate
+  php artisan migrate
 fi
 
 echo "Starting supervisord..."

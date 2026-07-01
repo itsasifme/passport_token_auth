@@ -10,30 +10,27 @@ services:
       target: production
     volumes:
       - app_supervisor_logs:/var/www/storage/logs/supervisor
-    ports:
-      - "8080:80"
-    env_file:
-      - ./src/.env.prod
+    expose:
+      - "9000"
     environment:
       - APP_ENV=production
     working_dir: /var/www/
     restart: unless-stopped
 
   nginx:
-    image: nginx:latest
-    container_name: nginx
-    environment:
-      - NGINX_HOST=app
-      - NGINX_PORT=9000
-    ports:
-      - "8000:80"
-    volumes:
-      - ./src:/var/www/
-      - ./docker/nginx/templates:/etc/nginx/templates
-      - ./docker/nginx/html:/usr/share/nginx/html
-    depends_on:
-      - app  
-    restart: unless-stopped
+      container_name: nginx
+      build:
+        context: .
+        dockerfile: ./docker/nginx/Dockerfile
+        target: production
+      environment:
+        - NGINX_HOST=app
+        - NGINX_PORT=9000
+      ports:
+        - "8000:80"
+      depends_on:
+        - app  
+      restart: unless-stopped
 
 volumes:
     app_supervisor_logs:
