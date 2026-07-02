@@ -7,7 +7,7 @@ services:
         uid: 1412
       context: .
       dockerfile: /docker/php-fpm/Dockerfile
-      target: base_php_fpm 
+      target: development_base_php
     volumes:
       - ./src:/var/www/
       - ./src/.env.local:/var/www/.env
@@ -29,7 +29,7 @@ services:
       build:
         context: .
         dockerfile: ./docker/nginx/Dockerfile
-        target: base_nginx
+        target: development_base_nginx
       environment:
         - NGINX_HOST=app
         - NGINX_PORT=9000

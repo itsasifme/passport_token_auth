@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: run-migrations
+          image: passport_token_auth-app:latest
+      containers:
+        - name: app
+          image: passport_token_auth-app:latest
+          env:
+            - name: APP_ENV
+              value: dev
+          volumeMounts:
+            - mountPath: /var/www/.env
+              name: app-env
+              subPath: .env
+      volumes:
+        - name: app-env
+          configMap:
+            name: app-env
+            items:
+              - key: .env.dev
+                path: .env

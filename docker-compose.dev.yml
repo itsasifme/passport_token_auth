@@ -1,0 +1,64 @@
+services:
+  app:
+    container_name: app
+    build:
+      args:
+        user: asif
+        uid: 1412
+      context: .
+      dockerfile: /docker/php-fpm/Dockerfile
+      target: server_deployment_php
+    image: passport_token_auth-app:latest
+    volumes:
+      - app_supervisor_logs:/var/www/storage/logs/supervisor
+    expose:
+      - "9000"
+    env_file:
+      - ./src/.env.dev
+    environment:
+      - APP_ENV=dev
+    working_dir: /var/www/
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    container_name: nginx
+    build:
+      context: .
+      dockerfile: ./docker/nginx/Dockerfile
+        target: server_deployment_nginx
+    image: passport_token_auth-nginx:latest
+    environment:
+      - NGINX_HOST=app
+      - NGINX_PORT=9000
+    ports:
+      - "8000:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: passport_token_auth
+      MYSQL_USER: asif
+      MYSQL_PASSWORD: asif
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uasif", "-pasif"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  app_supervisor_logs:

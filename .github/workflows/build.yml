@@ -1,0 +1,134 @@
+name: Build & Push Docker Images
+
+# Triggered on push to environment branches.
+# Branch → Environment mapping:
+#   dev     → APP_ENV=dev     → image tag :dev
+#   staging → APP_ENV=staging → image tag :staging
+#   main    → APP_ENV=production → image tag :latest and :<git-sha>
+#
+# GitHub Environments (dev / staging / production) gate which secrets are available,
+# so the same workflow file safely handles all three without secret leakage.
+
+on:
+  push:
+    branches:
+      - dev
+      - staging
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, staging, production]
+
+env:
+  REGISTRY: ghcr.io
+  # ghcr.io/<owner>/<repo> — GitHub sets this automatically
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: Build & Push (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+
+    # Map branch name to a GitHub Environment so environment-specific secrets are used.
+    environment: >-
+      ${{
+        github.ref_name == 'main' && 'production' ||
+        github.ref_name
+      }}
+
+    permissions:
+      contents: read
+      packages: write   # required to push to ghcr.io
+
+    steps:
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Determine image tag and APP_ENV from the branch name.
+      - name: Set environment metadata
+        id: meta
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "app_env=production"   >> $GITHUB_OUTPUT
+            echo "image_tag=latest"     >> $GITHUB_OUTPUT
+          else
+            echo "app_env=${{ github.ref_name }}"  >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      # -----------------------------------------------------------------------
+      # Write src/.env.prod from a single GitHub Environment secret (ENV_FILE).
+      # The full .env content is stored in GitHub → Settings → Environments → <env> → Secrets.
+      # This way adding/changing env vars only requires updating the secret, not this workflow.
+      - name: Write src/.env.prod from secret
+        run: echo "${{ secrets.ENV_FILE }}" > src/.env.prod
+
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # Build and push the PHP-FPM app image.
+      # GitHub Actions cache (type=gha) speeds up subsequent builds significantly.
+      - name: Build & push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/php-fpm/Dockerfile
+          target: server_deployment_php
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }}
+            ${{ env.IMAGE_BASE }}-app:${{ github.sha }}
+          build-args: |
+            user=asif
+            uid=1412
+          cache-from: type=gha,scope=app-${{ steps.meta.outputs.image_tag }}
+          cache-to:   type=gha,scope=app-${{ steps.meta.outputs.image_tag }},mode=max
+
+      # -----------------------------------------------------------------------
+      # Build and push the Nginx image.
+      - name: Build & push nginx image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/nginx/Dockerfile
+          target: server_deployment_nginx
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}
+            ${{ env.IMAGE_BASE }}-nginx:${{ github.sha }}
+          cache-from: type=gha,scope=nginx-${{ steps.meta.outputs.image_tag }}
+          cache-to:   type=gha,scope=nginx-${{ steps.meta.outputs.image_tag }},mode=max
+
+      # -----------------------------------------------------------------------
+      # After pushing the image, update the image tag in the kustomize overlay
+      # and commit it back to the repo. This means the overlay always reflects
+      # exactly which image SHA is deployed — no manual edits needed.
+      # ArgoCD / Flux (if used) will detect the commit and auto-deploy.
+      # For plain kubectl, trigger a separate deploy job or run kubectl apply here.
+      - name: Update image tag in kustomize overlay
+        run: |
+          cd k8s/overlays/${{ steps.meta.outputs.app_env }}
+          kustomize edit set image \
+            passport_token_auth-app=${{ env.IMAGE_BASE }}-app:${{ github.sha }} \
+            passport_token_auth-nginx=${{ env.IMAGE_BASE }}-nginx:${{ github.sha }}
+
+      - name: Commit updated kustomization back to repo
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: update ${{ steps.meta.outputs.app_env }} image to ${{ github.sha }}"
+          file_pattern: k8s/overlays/${{ steps.meta.outputs.app_env }}/kustomization.yaml

@@ -7,7 +7,7 @@ services:
         uid: 1412
       context: .
       dockerfile: /docker/php-fpm/Dockerfile
-      target: production
+      target: server_deployment_php
     volumes:
       - app_supervisor_logs:/var/www/storage/logs/supervisor
     expose:
@@ -22,7 +22,7 @@ services:
       build:
         context: .
         dockerfile: ./docker/nginx/Dockerfile
-        target: production
+        target: server_deployment_nginx
       environment:
         - NGINX_HOST=app
         - NGINX_PORT=9000

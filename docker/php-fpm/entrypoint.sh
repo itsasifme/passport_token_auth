@@ -1,5 +1,5 @@
 #!/bin/sh
-# dev-entrypoint
+# entrypoint
 
 set -e
 
@@ -9,7 +9,7 @@ XDEBUG_INI="/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
 XDEBUG_PATH=$(find /usr/local/lib/php/extensions/ -name xdebug.so 2>/dev/null)
 
 #Configure Xdebug based on environment
-if [ "$APP_ENV" = "production" ] || [ "$APP_ENV" = "staging" ]; then
+if [ "$APP_ENV" = "production" ] || [ "$APP_ENV" = "staging" ] || [ "$APP_ENV" = "dev" ]; then
   echo "Disabling Xdebug..."
   rm -f "$XDEBUG_INI"
 else
@@ -31,16 +31,15 @@ else
 fi
 
 # Composer install
-if [ "$APP_ENV" = "production" ] || [ "$APP_ENV" = "staging" ]; then
-  echo "Skipping Composer install and any type of command execution at runtime for production/staging."
-  # If you have any staging/production-specific setup that needs to run once, put it into staging/production Dockerfile.
+if [ "$APP_ENV" = "production" ] || [ "$APP_ENV" = "staging" ] || [ "$APP_ENV" = "dev" ]; then
+  echo "Skipping Composer install for production/staging/dev."
 else
-  echo "Installing Composer dependencies for development..."
+  echo "Installing Composer dependencies for local development..."
   composer install
 
   # If you have any development-specific setup that needs to run when container boot up, put it here.
   # For example:
-  # php artisan optimize
+  php artisan optimize
   # php artisan config:cache
   # php artisan route:cache
   # php artisan view:cache

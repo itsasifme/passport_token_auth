@@ -1,28 +1,36 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    kompose.cmd: C:\ProgramData\chocolatey\lib\kubernetes-kompose\tools\kompose.exe convert -f docker-compose.yml -o k8s/local/
-    kompose.version: 1.38.0 (a8f5d1cbd)
   labels:
-    io.kompose.service: app
+    app: app
   name: app
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      io.kompose.service: app
+      app: app
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        io.kompose.service: app
+        app: app
     spec:
       initContainers:
         - name: wait-for-mysql
           image: busybox:1.36
           command: ['sh', '-c', 'until nc -z -w 2 mysql 3306; do echo waiting for mysql; sleep 2; done;']
+        - name: run-migrations
+          image: passport_token_auth-app:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /var/www/
+          command: ['sh', '-c', 'php artisan config:cache && php artisan migrate --force']
+          envFrom:
+            - secretRef:
+                name: app-secret
+          volumeMounts:
+            - mountPath: /var/www/.env
+              name: app-env
+              subPath: .env
       containers:
         - name: app
           image: passport_token_auth-app:latest
@@ -32,19 +40,32 @@ spec:
               protocol: TCP
           volumeMounts:
             - mountPath: /var/www/.env
-              name: app-cm1
+              name: app-env
               subPath: .env
             - mountPath: /var/www/storage/logs/supervisor
               name: app-supervisor-logs
+          env:
+            - name: APP_ENV
+              value: production
+          envFrom:
+            - secretRef:
+                name: app-secret
           workingDir: /var/www/
+          resources:
+            requests:
+              memory: "256Mi"   # Minimum memory guaranteed for PHP/Laravel
+              cpu: "100m"
+            limits:
+              memory: "512Mi"   # Max memory allowed before an OOMKilled crash
+              cpu: "500m"
       restartPolicy: Always
       volumes:
         - configMap:
             items:
               - key: .env.local
                 path: .env
-            name: app-cm1
-          name: app-cm1
+            name: app-env
+          name: app-env
         - name: app-supervisor-logs
           persistentVolumeClaim:
             claimName: app-supervisor-logs

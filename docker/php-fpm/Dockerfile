@@ -1,21 +1,38 @@
 # syntax=docker/dockerfile:1.4
-# This Dockerfile uses multi-stage builds to create a lean production image
-# while providing a convenient base for development.
+#
+# Multi-stage Dockerfile for Laravel PHP-FPM application.
+#
+# Stages:
+#   development_base_php  — shared base used by local bind-mount dev (docker-compose.local.yml)
+#   server_deployment_php — deployable image for all server environments (dev, staging, production)
+#                           built via docker-compose.dev.yml / docker-compose.kind.yml / etc.
+#
+# Usage:
+#   Local dev (bind-mount):  docker compose -f docker-compose.local.yml up
+#   Server image build:      docker compose -f docker-compose.<env>.yml build
 
-# --- Stage 1: Base PHP-FPM Setup (Common dependencies and user setup) ---
-# This stage serves as the foundation for both development and production images.
-# It installs core PHP extensions, system dependencies, Composer, and Supervisor.
-# It also defines the application user and sets up the entrypoint script.
-FROM php:8.2.0-fpm AS base_php_fpm
+# =============================================================================
+# Stage 1: development_base_php
+# =============================================================================
+# Shared foundation for all environments. Installs:
+#   - System packages (git, zip, nodejs, supervisor, etc.)
+#   - PHP extensions (pdo_mysql, mbstring, gd, xdebug, etc.)
+#   - Composer binary
+#   - Non-root application user
+#   - Supervisor and entrypoint script
+#
+# When used directly (docker-compose.local.yml), source code is bind-mounted
+# at runtime so no COPY of src/ is needed here.
+FROM php:8.2.0-fpm AS development_base_php
 
 LABEL maintainer="Md. Asif Rahman"
 
-# Arguments for user and UID, passed during build (e.g., from docker-compose.yml)
+# Build arguments: non-root user name and UID (passed from docker-compose build args).
 ARG user
 ARG uid
 
-# Install system dependencies and PHP extensions
-# Using a single RUN command to minimize layers and improve build cache efficiency.
+# Install system packages and PHP extensions in a single layer to keep image size small.
+# --no-install-recommends avoids pulling in unnecessary suggested packages.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -41,72 +58,67 @@ RUN apt-get update \
     && docker-php-ext-enable xdebug \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Get latest Composer from the official Composer image.
-# This ensures you always have a recent version of Composer.
+# Copy Composer binary from the official Composer image to avoid installing it via apt.
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Create a dedicated system user to run Composer and Artisan Commands.
-# This enhances security by not running the application as root.
+# Create a dedicated non-root user to run Composer and Artisan commands.
+# Running as root inside the container is a security risk.
 RUN useradd -G www-data,root -u "$uid" -d "/home/$user" "$user" \
     && mkdir -p "/home/$user/.composer" \
     && chown -R "$user":"$user" "/home/$user"
 
-# Set the working directory for subsequent instructions.
 WORKDIR /var/www
 
-# Copy Supervisor configuration and the custom entrypoint script.
-# These files are essential for managing PHP-FPM and queue workers.
+# Copy Supervisor config and the container entrypoint script.
 COPY ./docker/php-fpm/supervisor.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ./docker/php-fpm/entrypoint.sh /usr/local/bin/entrypoint.sh
-
-# Make the entrypoint script executable.
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Ensure necessary directories for logs and PHP configurations have correct ownership.
-# This is important for the non-root user to write logs and for PHP-FPM to function.
+# Pre-create the supervisor log directory and fix ownership.
+# The non-root user must be able to write here at runtime.
 RUN mkdir -p /var/www/storage/logs/supervisor \
     && chown -R "$user":"$user" /var/www/storage/logs/supervisor \
     && chown -R "$user":"$user" /usr/local/etc/php/conf.d
 
-# --- Configuration for the 'base_php_fpm' stage when used as a development image ---
-# These instructions define how the 'base_php_fpm' image will behave if run directly.
-# This is useful for development where code is bind-mounted.
+# Switch to non-root user. All subsequent RUN/CMD/ENTRYPOINT run as this user.
 USER "$user"
+
+# entrypoint.sh handles: xdebug toggle, composer install (local only), migrate, supervisord start.
 ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
 
-# Define the ENTRYPOINT using the shell form to run multiple commands.
-# This starts supervisord in the background and then execs php-fpm in the foreground
-# as the main process.
-# ENTRYPOINT ["/bin/sh", "-c", "supervisord -c /etc/supervisor/conf.d/supervisord.conf & exec php-fpm -F"]
+# =============================================================================
+# Stage 2: server_deployment_php
+# =============================================================================
+# Extends development_base_php with the application source code baked in.
+# Used for all server environments: dev, staging, production (and kind for local testing).
+#
+# What this stage does at build time:
+#   1. Copies src/ into the image (no bind mount needed on the server)
+#   2. Copies src/.env.prod as /var/www/.env (sensitive values left blank;
+#      real values are injected at runtime via k8s ConfigMap + Secret)
+#   3. Runs composer install --no-dev to strip dev dependencies from the image
+#   4. Runs php artisan optimize to cache routes, views, events
+#      (config cache is intentionally excluded — baked config would use blank DB_HOST etc.)
+#      Note: config:cache runs at container startup via entrypoint.sh / run-migrations initContainer
+FROM development_base_php AS server_deployment_php
 
-# --- Stage 2: Production Image (Includes application code and optimized Composer setup) ---
-# This stage builds upon the 'base_php_fpm' stage and adds the application code.
-# It's optimized for production by baking in Composer dependencies at build time.
-FROM base_php_fpm AS production
-
-# Re-declare ARGs for this stage if they are needed for subsequent commands in this stage.
 ARG user
 ARG uid
 
-# Copy application code into the image and set the correct ownership at the same time.
-# This prevents the 'chown' operation not permitted error.
+# Copy source code with correct ownership in a single layer (avoids a separate chown layer).
 COPY --chown="$user":"$user" src /var/www/
 
-# Copy the production environment file and set it as the main .env file.
-# The ownership is already handled by the previous COPY command, so we can omit --chown here.
+# Copy the env template. Sensitive fields (DB_PASSWORD, APP_KEY, etc.) are intentionally
+# blank here — they are injected at runtime via k8s Secret mounted at /var/www/.env.
 COPY src/.env.prod /var/www/.env
 
-# Switch to the non-root user BEFORE running Composer to ensure correct permissions.
 USER "$user"
 
-# Run Composer install for production dependencies.
-# This bakes dependencies into the image, leading to faster container startup in production.
-# It also ensures Composer is not needed at runtime in production.
+# Install production-only Composer dependencies and remove the local cache to reduce image size.
 RUN composer install --no-dev --optimize-autoloader && rm -rf /home/"$user"/.composer
 
-# Cache Laravel config, routes, views, and events at build time.
-# Since .env.prod is already copied above, real values are used — no dummy vars needed.
+# Cache routes, views, and events at build time.
+# Config cache is skipped here intentionally — see note above.
 RUN php artisan optimize
 
-# The USER, ENTRYPOINT, and CMD are inherited from the 'base_php_fpm' stage.
-# No need to redefine them here unless you want different behavior specifically for production.
+# USER and ENTRYPOINT are inherited from development_base_php — no need to repeat them.
