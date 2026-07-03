@@ -1,4 +1,4 @@
-name: Build & Push Docker Images
+name: Build
 
 # Manual deployment workflow - images tagged with SHA only (no 'latest')
 
@@ -13,102 +13,84 @@ on:
           - dev
           - staging
           - production
-      ref:
-        description: "Branch or tag to deploy (leave empty for current branch)"
-        required: false
-        type: string
-        default: ""
 
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/${{ github.repository }}
 
 jobs:
-  quality-checks:
-    name: Quality Checks
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-          fetch-depth: 0
-
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, dom, filter, gd, json, zip
-          coverage: none
-
-      - name: Install Composer dependencies
-        working-directory: src
-        run: composer install --prefer-dist --no-progress --no-interaction
-
-      - name: Prepare test environment
-        working-directory: src
-        run: |
-          cp .env.example .env.testing
-          sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/' .env.testing
-          sed -i 's/^DB_DATABASE=.*/DB_DATABASE=:memory:/' .env.testing
-          php artisan key:generate --env=testing
-
-      - name: Run PHPStan (Static Analysis)
-        working-directory: src
-        run: ./vendor/bin/phpstan analyse --memory-limit=2G
-        continue-on-error: false
-
-      - name: Run PHPUnit Tests
-        working-directory: src
-        run: ./vendor/bin/phpunit
-        continue-on-error: false
-
-      - name: Check Composer dependencies for known security vulnerabilities
-        working-directory: src
-        run: composer audit
-
   build:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: quality-checks
 
     environment: ${{ inputs.environment }}
 
     permissions:
-      contents: write
-      packages: write
+      contents: read       # Needed to read code and check runs
+      actions: read        # Needed to query workflow statuses
+      packages: write      # Needed to push to GHCR
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Get deployment ref info
         id: ref_info
         run: |
-          if [ -n "${{ inputs.ref }}" ]; then
-            DEPLOY_REF="${{ inputs.ref }}"
-          else
-            DEPLOY_REF="${{ github.ref_name }}"
+          echo "deploy_ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "deploy_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "ref_type=${{ github.ref_type }}" >> $GITHUB_OUTPUT
+
+      - name: Verify CI Quality Checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ steps.ref_info.outputs.deploy_sha }}"
+          echo "🔍 Checking CI status for commit $SHA..."
+          
+          # Configuration for polling
+          MAX_RETRIES=30    # 30 retries
+          SLEEP_TIME=30     # 30 seconds per retry = 15 minutes max wait time
+          RETRY_COUNT=0
+
+          # 1. Wait for all REQUIRED checks to complete
+          # It filters for your specific workflows: PHPUnit Tests, Code Style With PHP CS Fixer, Static Analysis With Larastan, Verify Migrations
+          while true; do
+            PENDING_CHECKS=$(gh api repos/${{ github.repository }}/commits/$SHA/check-runs \
+              --jq '.check_runs[] | select((.name == "PHPUnit Tests" or .name == "Code Style With PHP CS Fixer" or .name == "Static Analysis With Larastan" or .name == "Verify Migrations") and .status != "completed") | .name')
+              
+            if [ -z "$PENDING_CHECKS" ]; then
+              echo "✅ All required CI workflows have completed!"
+              break
+            fi
+
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              echo "⏳ ERROR: Timed out waiting for CI checks to complete."
+              exit 1
+            fi
+
+            echo "⏳ Waiting for required checks to finish... (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)"
+            echo "$PENDING_CHECKS" | sed 's/^/  - /'
+            
+            sleep $SLEEP_TIME
+            ((RETRY_COUNT++))
+          done
+          
+          # 2. Once completed, verify that none of them failed or were cancelled
+          FAILED_CHECKS=$(gh api repos/${{ github.repository }}/commits/$SHA/check-runs \
+            --jq '.check_runs[] | select((.name == "Tests" or .name == "Static Analysis" or .name == "Verify Migrations") and .conclusion != "success" and .conclusion != "skipped") | .name')
+          
+          if [ -n "$FAILED_CHECKS" ]; then
+            echo "❌ ERROR: The following required quality checks failed or were cancelled:"
+            echo "$FAILED_CHECKS" | sed 's/^/  - /'
+            echo "Please fix the failing workflows before deploying."
+            exit 1
           fi
           
-          # Get current commit SHA
-          DEPLOY_SHA=$(git rev-parse HEAD)
-          
-          # Check if it's a tag
-          if git describe --exact-match --tags HEAD 2>/dev/null; then
-            REF_TYPE="tag"
-          else
-            REF_TYPE="branch"
-          fi
-          
-          echo "deploy_ref=$DEPLOY_REF" >> $GITHUB_OUTPUT
-          echo "deploy_sha=$DEPLOY_SHA" >> $GITHUB_OUTPUT
-          echo "ref_type=$REF_TYPE" >> $GITHUB_OUTPUT
+          echo "🎉 All required quality checks have passed successfully! Proceeding with image build..."
 
       - name: Display deployment info
         run: |
@@ -119,28 +101,6 @@ jobs:
           if [ "${{ inputs.environment }}" = "production" ]; then
             echo "⚠️  WARNING: Deploying to PRODUCTION environment"
           fi
-
-      - name: Validate branch restrictions
-        run: |
-          ENV="${{ inputs.environment }}"
-          REF_TYPE="${{ steps.ref_info.outputs.ref_type }}"
-          DEPLOY_REF="${{ steps.ref_info.outputs.deploy_ref }}"
-          
-          if [ "$ENV" = "production" ]; then
-            if [ "$REF_TYPE" = "branch" ] && [ "$DEPLOY_REF" != "main" ]; then
-              echo "❌ Production can only deploy from 'main' branch or tags"
-              echo "   Current: $DEPLOY_REF (branch)"
-              exit 1
-            fi
-          elif [ "$ENV" = "staging" ]; then
-            if [ "$REF_TYPE" = "branch" ] && [ "$DEPLOY_REF" != "staging" ]; then
-              echo "❌ Staging can only deploy from 'staging' branch or tags"
-              echo "   Current: $DEPLOY_REF (branch)"
-              exit 1
-            fi
-          fi
-          
-          echo "✅ Branch validation passed"
 
       - name: Set environment metadata
         id: meta

@@ -115,7 +115,7 @@ COPY src/.env.prod /var/www/.env
 USER "$user"
 
 # Install production-only Composer dependencies and remove the local cache to reduce image size.
-RUN composer install --no-dev --optimize-autoloader && rm -rf /home/"$user"/.composer
+RUN composer install --no-dev --optimize-autoloader && rm -rf /home/${user}/.composer
 
 # Cache routes, views, and events at build time.
 # Config cache is skipped here intentionally — see note above.

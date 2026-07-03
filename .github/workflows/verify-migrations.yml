@@ -1,4 +1,4 @@
-name: Database Migration Check
+name: Verify Migrations
 
 on:
   push:
