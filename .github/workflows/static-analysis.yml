@@ -1,4 +1,4 @@
-name: Static Analysis With Larastan
+name: Static Analysis with Larastan
 
 on:
   push:

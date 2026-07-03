@@ -26,7 +26,7 @@ jobs:
     environment: ${{ inputs.environment }}
 
     permissions:
-      contents: read       # Needed to read code and check runs
+      contents: write      # Needed to read code, check runs, and push the kustomize update commit
       actions: read        # Needed to query workflow statuses
       packages: write      # Needed to push to GHCR
 
@@ -57,11 +57,12 @@ jobs:
           RETRY_COUNT=0
 
           # 1. Wait for all REQUIRED checks to complete
-          # It filters for your specific workflows: Tests with PHPUnit, Code Style with PHP CS Fixer, Static Analysis with Larastan, Verify Migrations with SQLite
+          # Check-run names are the job IDs (no job-level `name:` is set in these workflows),
+          # not the workflow-level names: PHPUnit, php-cs-fixer, larastan, migration-check
           while true; do
             PENDING_CHECKS=$(gh api repos/${{ github.repository }}/commits/$SHA/check-runs \
-              --jq '.check_runs[] | select((.name == "Tests with PHPUnit" or .name == "Code Style with PHP CS Fixer" or .name == "Static Analysis with Larastan" or .name == "Verify Migrations with SQLite") and .status != "completed") | .name')
-              
+              --jq '.check_runs[] | select((.name == "PHPUnit" or .name == "php-cs-fixer" or .name == "larastan" or .name == "migration-check") and .status != "completed") | .name')
+
             if [ -z "$PENDING_CHECKS" ]; then
               echo "✅ All required CI workflows have completed!"
               break
@@ -74,14 +75,14 @@ jobs:
 
             echo "⏳ Waiting for required checks to finish... (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)"
             echo "$PENDING_CHECKS" | sed 's/^/  - /'
-            
+
             sleep $SLEEP_TIME
-            ((RETRY_COUNT++))
+            RETRY_COUNT=$((RETRY_COUNT+1))
           done
-          
+
           # 2. Once completed, verify that none of them failed or were cancelled
           FAILED_CHECKS=$(gh api repos/${{ github.repository }}/commits/$SHA/check-runs \
-            --jq '.check_runs[] | select((.name == "Tests" or .name == "Static Analysis" or .name == "Verify Migrations") and .conclusion != "success" and .conclusion != "skipped") | .name')
+            --jq '.check_runs[] | select((.name == "PHPUnit" or .name == "php-cs-fixer" or .name == "larastan" or .name == "migration-check") and .conclusion != "success" and .conclusion != "skipped") | .name')
           
           if [ -n "$FAILED_CHECKS" ]; then
             echo "❌ ERROR: The following required quality checks failed or were cancelled:"
