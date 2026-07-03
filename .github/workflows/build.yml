@@ -1,4 +1,4 @@
-name: Build
+name: Build, Push & Update Manifests
 
 # Manual deployment workflow - images tagged with SHA only (no 'latest')
 
@@ -20,7 +20,7 @@ env:
 
 jobs:
   build:
-    name: Build & Push
+    name: Build, Push & Stage
     runs-on: ubuntu-latest
 
     environment: ${{ inputs.environment }}
@@ -57,10 +57,10 @@ jobs:
           RETRY_COUNT=0
 
           # 1. Wait for all REQUIRED checks to complete
-          # It filters for your specific workflows: PHPUnit Tests, Code Style With PHP CS Fixer, Static Analysis With Larastan, Verify Migrations
+          # It filters for your specific workflows: Tests with PHPUnit, Code Style with PHP CS Fixer, Static Analysis with Larastan, Verify Migrations with SQLite
           while true; do
             PENDING_CHECKS=$(gh api repos/${{ github.repository }}/commits/$SHA/check-runs \
-              --jq '.check_runs[] | select((.name == "PHPUnit Tests" or .name == "Code Style With PHP CS Fixer" or .name == "Static Analysis With Larastan" or .name == "Verify Migrations") and .status != "completed") | .name')
+              --jq '.check_runs[] | select((.name == "Tests with PHPUnit" or .name == "Code Style with PHP CS Fixer" or .name == "Static Analysis with Larastan" or .name == "Verify Migrations with SQLite") and .status != "completed") | .name')
               
             if [ -z "$PENDING_CHECKS" ]; then
               echo "✅ All required CI workflows have completed!"

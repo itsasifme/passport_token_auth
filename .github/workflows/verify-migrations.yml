@@ -1,4 +1,4 @@
-name: Verify Migrations
+name: Verify Migrations with SQLite
 
 on:
   push:
