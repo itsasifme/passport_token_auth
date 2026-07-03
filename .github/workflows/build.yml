@@ -1,75 +1,158 @@
 name: Build & Push Docker Images
 
-# Triggered on push to environment branches.
-# Branch → Environment mapping:
-#   dev     → APP_ENV=dev     → image tag :dev
-#   staging → APP_ENV=staging → image tag :staging
-#   main    → APP_ENV=production → image tag :latest and :<git-sha>
-#
-# GitHub Environments (dev / staging / production) gate which secrets are available,
-# so the same workflow file safely handles all three without secret leakage.
+# Manual deployment workflow - images tagged with SHA only (no 'latest')
 
 on:
-  push:
-    branches:
-      - dev
-      - staging
-      - main
   workflow_dispatch:
     inputs:
       environment:
         description: "Target environment"
         required: true
         type: choice
-        options: [dev, staging, production]
+        options:
+          - dev
+          - staging
+          - production
+      ref:
+        description: "Branch or tag to deploy (leave empty for current branch)"
+        required: false
+        type: string
+        default: ""
 
 env:
   REGISTRY: ghcr.io
-  # ghcr.io/<owner>/<repo> — GitHub sets this automatically
   IMAGE_BASE: ghcr.io/${{ github.repository }}
 
 jobs:
-  build:
-    name: Build & Push (${{ github.ref_name }})
+  quality-checks:
+    name: Quality Checks
     runs-on: ubuntu-latest
-
-    # Map branch name to a GitHub Environment so environment-specific secrets are used.
-    environment: >-
-      ${{
-        github.ref_name == 'main' && 'production' ||
-        github.ref_name
-      }}
-
-    permissions:
-      contents: read
-      packages: write   # required to push to ghcr.io
-
+    
     steps:
-      # -----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
 
-      # -----------------------------------------------------------------------
-      # Determine image tag and APP_ENV from the branch name.
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, dom, filter, gd, json, zip
+          coverage: none
+
+      - name: Install Composer dependencies
+        working-directory: src
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Prepare test environment
+        working-directory: src
+        run: |
+          cp .env.example .env.testing
+          sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/' .env.testing
+          sed -i 's/^DB_DATABASE=.*/DB_DATABASE=:memory:/' .env.testing
+          php artisan key:generate --env=testing
+
+      - name: Run PHPStan (Static Analysis)
+        working-directory: src
+        run: ./vendor/bin/phpstan analyse --memory-limit=2G
+        continue-on-error: false
+
+      - name: Run PHPUnit Tests
+        working-directory: src
+        run: ./vendor/bin/phpunit
+        continue-on-error: false
+
+      - name: Check Composer dependencies for known security vulnerabilities
+        working-directory: src
+        run: composer audit
+
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: quality-checks
+
+    environment: ${{ inputs.environment }}
+
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Get deployment ref info
+        id: ref_info
+        run: |
+          if [ -n "${{ inputs.ref }}" ]; then
+            DEPLOY_REF="${{ inputs.ref }}"
+          else
+            DEPLOY_REF="${{ github.ref_name }}"
+          fi
+          
+          # Get current commit SHA
+          DEPLOY_SHA=$(git rev-parse HEAD)
+          
+          # Check if it's a tag
+          if git describe --exact-match --tags HEAD 2>/dev/null; then
+            REF_TYPE="tag"
+          else
+            REF_TYPE="branch"
+          fi
+          
+          echo "deploy_ref=$DEPLOY_REF" >> $GITHUB_OUTPUT
+          echo "deploy_sha=$DEPLOY_SHA" >> $GITHUB_OUTPUT
+          echo "ref_type=$REF_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Display deployment info
+        run: |
+          echo "🚀 Deploying to: ${{ inputs.environment }}"
+          echo "📦 Ref: ${{ steps.ref_info.outputs.deploy_ref }} (${{ steps.ref_info.outputs.ref_type }})"
+          echo "🔖 Commit SHA: ${{ steps.ref_info.outputs.deploy_sha }}"
+          
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            echo "⚠️  WARNING: Deploying to PRODUCTION environment"
+          fi
+
+      - name: Validate branch restrictions
+        run: |
+          ENV="${{ inputs.environment }}"
+          REF_TYPE="${{ steps.ref_info.outputs.ref_type }}"
+          DEPLOY_REF="${{ steps.ref_info.outputs.deploy_ref }}"
+          
+          if [ "$ENV" = "production" ]; then
+            if [ "$REF_TYPE" = "branch" ] && [ "$DEPLOY_REF" != "main" ]; then
+              echo "❌ Production can only deploy from 'main' branch or tags"
+              echo "   Current: $DEPLOY_REF (branch)"
+              exit 1
+            fi
+          elif [ "$ENV" = "staging" ]; then
+            if [ "$REF_TYPE" = "branch" ] && [ "$DEPLOY_REF" != "staging" ]; then
+              echo "❌ Staging can only deploy from 'staging' branch or tags"
+              echo "   Current: $DEPLOY_REF (branch)"
+              exit 1
+            fi
+          fi
+          
+          echo "✅ Branch validation passed"
+
       - name: Set environment metadata
         id: meta
         run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "app_env=production"   >> $GITHUB_OUTPUT
-            echo "image_tag=latest"     >> $GITHUB_OUTPUT
-          else
-            echo "app_env=${{ github.ref_name }}"  >> $GITHUB_OUTPUT
-            echo "image_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
+          echo "app_env=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          echo "image_tag=${{ steps.ref_info.outputs.deploy_sha }}" >> $GITHUB_OUTPUT
 
-      # -----------------------------------------------------------------------
-      # Write src/.env.prod from a single GitHub Environment secret (ENV_FILE).
-      # The full .env content is stored in GitHub → Settings → Environments → <env> → Secrets.
-      # This way adding/changing env vars only requires updating the secret, not this workflow.
-      - name: Write src/.env.prod from secret
-        run: echo "${{ secrets.ENV_FILE }}" > src/.env.prod
+      - name: Set up Kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: '5.0.0'
 
-      # -----------------------------------------------------------------------
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -80,9 +163,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # -----------------------------------------------------------------------
-      # Build and push the PHP-FPM app image.
-      # GitHub Actions cache (type=gha) speeds up subsequent builds significantly.
+      - name: Run Trivy vulnerability scanner (base check)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'docker/php-fpm/Dockerfile'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+        continue-on-error: ${{ steps.meta.outputs.app_env != 'production' }}
+
       - name: Build & push app image
         uses: docker/build-push-action@v6
         with:
@@ -90,17 +179,13 @@ jobs:
           file: docker/php-fpm/Dockerfile
           target: server_deployment_php
           push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }}
-            ${{ env.IMAGE_BASE }}-app:${{ github.sha }}
+          tags: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }}
           build-args: |
             user=asif
             uid=1412
-          cache-from: type=gha,scope=app-${{ steps.meta.outputs.image_tag }}
-          cache-to:   type=gha,scope=app-${{ steps.meta.outputs.image_tag }},mode=max
+          cache-from: type=gha,scope=app-${{ steps.meta.outputs.app_env }}
+          cache-to:   type=gha,scope=app-${{ steps.meta.outputs.app_env }},mode=max
 
-      # -----------------------------------------------------------------------
-      # Build and push the Nginx image.
       - name: Build & push nginx image
         uses: docker/build-push-action@v6
         with:
@@ -108,27 +193,67 @@ jobs:
           file: docker/nginx/Dockerfile
           target: server_deployment_nginx
           push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}
-            ${{ env.IMAGE_BASE }}-nginx:${{ github.sha }}
-          cache-from: type=gha,scope=nginx-${{ steps.meta.outputs.image_tag }}
-          cache-to:   type=gha,scope=nginx-${{ steps.meta.outputs.image_tag }},mode=max
+          tags: ${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha,scope=nginx-${{ steps.meta.outputs.app_env }}
+          cache-to:   type=gha,scope=nginx-${{ steps.meta.outputs.app_env }},mode=max
 
-      # -----------------------------------------------------------------------
-      # After pushing the image, update the image tag in the kustomize overlay
-      # and commit it back to the repo. This means the overlay always reflects
-      # exactly which image SHA is deployed — no manual edits needed.
-      # ArgoCD / Flux (if used) will detect the commit and auto-deploy.
-      # For plain kubectl, trigger a separate deploy job or run kubectl apply here.
+      - name: Scan app image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+        continue-on-error: ${{ steps.meta.outputs.app_env != 'production' }}
+
+      - name: Scan nginx image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+        continue-on-error: ${{ steps.meta.outputs.app_env != 'production' }}
+
       - name: Update image tag in kustomize overlay
         run: |
           cd k8s/overlays/${{ steps.meta.outputs.app_env }}
           kustomize edit set image \
-            passport_token_auth-app=${{ env.IMAGE_BASE }}-app:${{ github.sha }} \
-            passport_token_auth-nginx=${{ env.IMAGE_BASE }}-nginx:${{ github.sha }}
+            passport_token_auth-app=${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }} \
+            passport_token_auth-nginx=${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}
 
-      - name: Commit updated kustomization back to repo
+      - name: Validate kustomize build
+        run: |
+          echo "Validating kustomize overlay for ${{ steps.meta.outputs.app_env }}..."
+          kustomize build k8s/overlays/${{ steps.meta.outputs.app_env }} > /dev/null
+          echo "✅ Kustomize overlay is valid"
+
+      - name: Commit updated kustomization to Git
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "ci: update ${{ steps.meta.outputs.app_env }} image to ${{ github.sha }}"
+          commit_message: "ci: update ${{ steps.meta.outputs.app_env }} image to ${{ steps.ref_info.outputs.deploy_sha }} [skip ci]"
           file_pattern: k8s/overlays/${{ steps.meta.outputs.app_env }}/kustomization.yaml
+          commit_user_name: github-actions[bot]
+          commit_user_email: github-actions[bot]@users.noreply.github.com
+          skip_dirty_check: false
+          branch: ${{ inputs.environment == 'production' && 'main' || (inputs.environment == 'staging' && 'staging' || 'dev') }}
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Git updated successfully"
+          echo ""
+          echo "Images deployed:"
+          echo "  • ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }}"
+          echo "  • ${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}"
+          echo ""
+          if [ "${{ inputs.environment }}" = "dev" ]; then
+            echo "🚀 Dev: ArgoCD will auto-sync this deployment"
+          else
+            echo "📋 ${{ inputs.environment }}: Go to ArgoCD and click 'Sync' to deploy"
+          fi
+
+      - name: Tag deployment note
+        if: steps.ref_info.outputs.ref_type == 'tag'
+        run: |
+          echo "ℹ️  Tag deployment: ${{ steps.ref_info.outputs.deploy_ref }}"
+          echo "   Kustomization committed to: ${{ inputs.environment == 'production' && 'main' || (inputs.environment == 'staging' && 'staging' || 'dev') }}"
