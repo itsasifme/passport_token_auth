@@ -5,6 +5,7 @@ services:
       args:
         user: asif
         uid: 1412
+        env_file: .env.staging
       context: .
       dockerfile: /docker/php-fpm/Dockerfile
       target: server_deployment_php

@@ -36,7 +36,8 @@ spec:
           image: passport_token_auth-app:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 80
+            - name: fpm
+              containerPort: 9000
               protocol: TCP
           volumeMounts:
             - mountPath: /var/www/.env
@@ -51,6 +52,22 @@ spec:
             - secretRef:
                 name: app-secret
           workingDir: /var/www/
+          # php-fpm speaks FastCGI, not HTTP, so a TCP check on its listen port
+          # is the simplest reliable signal that the process is up and accepting connections.
+          livenessProbe:
+            tcpSocket:
+              port: fpm
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: fpm
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
               memory: "256Mi"   # Minimum memory guaranteed for PHP/Laravel

@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: passport-token-auth-gateway
+  labels:
+    app: nginx
+spec:
+  # PLACEHOLDER: set this to a GatewayClass that actually exists in the target cluster
+  # (e.g. envoy-gateway, istio, cloud-provider-managed). Requires the Gateway API CRDs
+  # and a controller to be installed cluster-side — neither ships with vanilla Kubernetes.
+  #
+  # If the cluster already has a shared Gateway (common in multi-tenant setups), delete
+  # this resource entirely and point the HTTPRoute's parentRefs at that existing Gateway
+  # (name + namespace) instead of creating a new one per app.
+  gatewayClassName: PLACEHOLDER-GATEWAY-CLASS
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same

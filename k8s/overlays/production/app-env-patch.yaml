@@ -26,5 +26,6 @@ spec:
           configMap:
             name: app-env
             items:
-              - key: .env.kind
+              - key: .env.production
                 path: .env
+

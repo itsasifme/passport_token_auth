@@ -10,3 +10,5 @@ resources:
   - mysql-deployment.yaml
   - mysql-service.yaml
   - mysql-data-pvc.yaml
+  - gateway.yaml
+  - nginx-httproute.yaml

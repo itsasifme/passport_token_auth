@@ -5,6 +5,13 @@ server {
     access_log /var/log/nginx/access.log;
     root /var/www/public;
 
+    # 0. Lightweight health check for k8s probes — doesn't touch PHP-FPM or the DB.
+    location = /healthz {
+        access_log off;
+        return 200 "ok";
+        add_header Content-Type text/plain;
+    }
+
     # 1. Catch-all routing goes FIRST
     location / {
         try_files $uri $uri/ /index.php?$query_string;

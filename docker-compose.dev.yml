@@ -5,6 +5,8 @@ services:
       args:
         user: asif
         uid: 1412
+        env_file: .env.dev
+        install_dev: "true"
       context: .
       dockerfile: /docker/php-fpm/Dockerfile
       target: server_deployment_php
@@ -17,6 +19,10 @@ services:
       - ./src/.env.dev
     environment:
       - APP_ENV=dev
+      - DB_PASSWORD=root
+      - APP_KEY=base64:gUOOhq/odpN93S5S7/+4w0xPvDkuvh2TTI+7QTPn+jI=
+      # Only compose sets this — k8s migrates once via its own initContainer instead.
+      - RUN_MIGRATIONS_ON_BOOT=true
     working_dir: /var/www/
     depends_on:
       mysql:
@@ -28,7 +34,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/nginx/Dockerfile
-        target: server_deployment_nginx
+      target: server_deployment_nginx
     image: passport_token_auth-nginx:latest
     environment:
       - NGINX_HOST=app

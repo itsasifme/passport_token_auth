@@ -76,7 +76,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Pre-create the supervisor log directory and fix ownership.
 # The non-root user must be able to write here at runtime.
+# /var/www itself is also chowned here: WORKDIR created it as root, and the
+# non-root user needs write access to it directly (e.g. to create vendor/ via composer install).
 RUN mkdir -p /var/www/storage/logs/supervisor \
+    && chown "$user":"$user" /var/www \
     && chown -R "$user":"$user" /var/www/storage/logs/supervisor \
     && chown -R "$user":"$user" /usr/local/etc/php/conf.d
 
@@ -92,33 +95,39 @@ ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
 # Extends development_base_php with the application source code baked in.
 # Used for all server environments: dev, staging, production (and kind for local testing).
 #
-# What this stage does at build time:
-#   1. Copies src/ into the image (no bind mount needed on the server)
-#   2. Copies src/.env.prod as /var/www/.env (sensitive values left blank;
-#      real values are injected at runtime via k8s ConfigMap + Secret)
-#   3. Runs composer install --no-dev to strip dev dependencies from the image
-#   4. Runs php artisan optimize to cache routes, views, events
-#      (config cache is intentionally excluded — baked config would use blank DB_HOST etc.)
-#      Note: config:cache runs at container startup via entrypoint.sh / run-migrations initContainer
+# Build-time steps: copy src/, seed a starting .env (real values come from k8s Secret /
+# compose env at runtime — see comments below), composer install --no-dev, then
+# `optimize --except=config` (routes/views/events only; config is cached fresh by
+# entrypoint.sh at container startup so it reflects real runtime values, not the
+# placeholder .env baked in here).
 FROM development_base_php AS server_deployment_php
 
 ARG user
 ARG uid
 
+# Env template to seed as a starting point (.env.dev, .env.staging, .env.kind, .env.prod, ...).
+# Override via --build-arg env_file=...; real secrets still come from runtime injection.
+ARG env_file=.env.prod
+
+# Whether to keep composer dev dependencies (phpunit, larastan, pint, ...) in the image.
+# Defaults to stripped (production-lean); set --build-arg install_dev=true for the dev target.
+ARG install_dev=false
+
 # Copy source code with correct ownership in a single layer (avoids a separate chown layer).
 COPY --chown="$user":"$user" src /var/www/
 
-# Copy the env template. Sensitive fields (DB_PASSWORD, APP_KEY, etc.) are intentionally
-# blank here — they are injected at runtime via k8s Secret mounted at /var/www/.env.
-COPY src/.env.prod /var/www/.env
+COPY src/${env_file} /var/www/.env
 
 USER "$user"
 
-# Install production-only Composer dependencies and remove the local cache to reduce image size.
-RUN composer install --no-dev --optimize-autoloader && rm -rf /home/${user}/.composer
+# Install Composer dependencies and remove the local cache to reduce image size.
+RUN if [ "$install_dev" = "true" ]; then \
+      composer install --optimize-autoloader; \
+    else \
+      composer install --no-dev --optimize-autoloader; \
+    fi \
+    && rm -rf /home/${user}/.composer
 
-# Cache routes, views, and events at build time.
-# Config cache is skipped here intentionally — see note above.
-RUN php artisan optimize
+RUN php artisan optimize --except=config
 
 # USER and ENTRYPOINT are inherited from development_base_php — no need to repeat them.

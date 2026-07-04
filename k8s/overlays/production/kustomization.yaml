@@ -3,10 +3,9 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - app-env-configmap.yaml
+  - app-secret.yaml
   - app-hpa.yaml
-  # Add production-specific resources:
-  # - app-env-configmap.yaml
-  # - app-secret.yaml       ← inject from CI/Vault, not committed to git
   # - nginx-hpa.yaml
 
 images:
@@ -17,12 +16,12 @@ images:
     newName: passport_token_auth-nginx
     newTag: latest
 
-# Example patches for production:
-# patches:
-#   - target:
-#       kind: Deployment
-#       name: app
-#     patch: |-
-#       - op: replace
-#         path: /spec/template/spec/containers/0/image
-#         value: your-registry/passport_token_auth-app:1.0.0
+patches:
+  - path: app-env-patch.yaml
+    target:
+      kind: Deployment
+      name: app
+  - path: httproute-patch.yaml
+    target:
+      kind: HTTPRoute
+      name: nginx

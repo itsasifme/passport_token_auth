@@ -16,11 +16,13 @@ This project is a robust API system built on **Laravel 12** that uses **Laravel 
       - **100% PSR-12** compliant code style. ✅
       - **100% test coverage** verified by both unit and feature tests. ✅
       - **Static analysis** with **Larastan** 🧐 to find potential bugs and code smells early.
-  - **Continuous Integration:** Four GitHub Actions workflows are configured to automate checks for every pull request:
-    1.  **PHPUnit Test with Coverage Check:** Runs the full test suite 🧪 and verifies code coverage percentage 📊.
-    2.  **Migration Check:** Ensures database migrations are valid and can be run. 💾
-    3.  **PHP-CS-Fixer Check:** Automatically checks and fixes code style to maintain PSR-12 compliance. 🎨
-    4.  **Larastan Check:** Performs static code analysis to catch common issues. 🚦
+  - **Kubernetes:** A Kustomize `base` + per-environment `overlays` setup (`dev`, `staging`, `production`, `kind`) with health probes, HPAs, and a Gateway API scaffold — see [`k8s/overlays/kind/README.md`](k8s/overlays/kind/README.md) to run it locally. ☸️
+  - **Continuous Integration & Deployment:** Five GitHub Actions workflows automate checks and deployment:
+    1.  **Tests with PHPUnit:** Runs the full test suite 🧪 and verifies code coverage percentage 📊.
+    2.  **Verify Migrations with SQLite:** Ensures database migrations are valid and can be run. 💾
+    3.  **Code Style with PHP CS Fixer:** Checks code style to maintain PSR-12 compliance. 🎨
+    4.  **Static Analysis with Larastan:** Performs static code analysis to catch common issues. 🚦
+    5.  **Build, Push & Update Manifests:** Gates on all four checks above, then builds/pushes Docker images and updates the Kustomize overlay for the target environment. 🚀
 
 -----
 
@@ -33,22 +35,43 @@ This project follows a monorepo structure with a clear and logical directory lay
 📦passport_token_auth
  ┣ 📂.github
  ┃ ┗ 📂workflows
- ┃ ┃ ┣ 📜database-migration-check.yml
- ┃ ┃ ┣ 📜larastan.yml
- ┃ ┃ ┣ 📜php-cs-fixer.yml
- ┃ ┃ ┣ 📜phpunit.yml
+ ┃ ┃ ┣ 📜build.yml               # Build, push & update Kustomize manifests
+ ┃ ┃ ┣ 📜code-style.yml
+ ┃ ┃ ┣ 📜static-analysis.yml
+ ┃ ┃ ┣ 📜tests.yml
+ ┃ ┃ ┗ 📜verify-migrations.yml
  ┣ 📂.vscode
  ┃ ┗ 📜launch.json
  ┣ 📂docker
  ┃ ┣ 📂nginx
  ┃ ┃ ┣ 📂html
  ┃ ┃ ┃ ┗ 📜maintenance.html
- ┃ ┃ ┗ 📂templates
+ ┃ ┃ ┣ 📂templates
  ┃ ┃ ┃ ┗ 📜default.conf.template
+ ┃ ┃ ┗ 📜Dockerfile
  ┃ ┗ 📂php-fpm
  ┃ ┃ ┣ 📜Dockerfile
  ┃ ┃ ┣ 📜entrypoint.sh
  ┃ ┃ ┗ 📜supervisor.conf
+ ┣ 📂k8s                          # Kustomize base + per-environment overlays
+ ┃ ┣ 📂base
+ ┃ ┃ ┣ 📜app-deployment.yaml
+ ┃ ┃ ┣ 📜app-service.yaml
+ ┃ ┃ ┣ 📜app-supervisor-logs-pvc.yaml
+ ┃ ┃ ┣ 📜gateway.yaml
+ ┃ ┃ ┣ 📜kustomization.yaml
+ ┃ ┃ ┣ 📜mysql-data-pvc.yaml
+ ┃ ┃ ┣ 📜mysql-deployment.yaml
+ ┃ ┃ ┣ 📜mysql-service.yaml
+ ┃ ┃ ┣ 📜nginx-deployment.yaml
+ ┃ ┃ ┣ 📜nginx-httproute.yaml
+ ┃ ┃ ┗ 📜nginx-service.yaml
+ ┃ ┗ 📂overlays
+ ┃ ┃ ┣ 📂dev
+ ┃ ┃ ┣ 📂kind                    # includes its own README.md — run it locally
+ ┃ ┃ ┣ 📂local
+ ┃ ┃ ┣ 📂production
+ ┃ ┃ ┗ 📂staging
  ┣ 📂src
  ┃ ┣ 📂app
  ┃ ┃ ┣ 📂Http
@@ -58,12 +81,12 @@ This project follows a monorepo structure with a clear and logical directory lay
  ┃ ┃ ┣ 📂Logging
  ┃ ┃ ┣ 📂Mixins
  ┃ ┃ ┣ 📂Models
- ┃ ┃ ┗ 📂Providersp
+ ┃ ┃ ┗ 📂Providers
  ┃ ┣ 📂bootstrap
  ┃ ┣ 📂config
  ┃ ┣ 📂coverage-html
  ┃ ┣ 📂database
- ┃ ┃ ┣ 📂factoriesp
+ ┃ ┃ ┣ 📂factories
  ┃ ┃ ┣ 📂migrations
  ┃ ┃ ┣ 📂seeders
  ┃ ┃ ┗ 📜.gitignore
@@ -73,15 +96,16 @@ This project follows a monorepo structure with a clear and logical directory lay
  ┃ ┣ 📂routes
  ┃ ┣ 📂storage
  ┃ ┃ ┣ 📂app
- ┃ ┃ ┃ ┣ 📂public
+ ┃ ┃ ┃ ┗ 📂public
  ┃ ┃ ┣ 📂framework
  ┃ ┃ ┗ 📂logs
  ┃ ┣ 📂tests
  ┃ ┃ ┣ 📂Feature
- ┃ ┃ ┣ 📂Unit
+ ┃ ┃ ┗ 📂Unit
  ┃ ┣ 📂vendor
- ┃ ┣ 📜.env
+ ┃ ┣ 📜.env.dev
  ┃ ┣ 📜.env.example
+ ┃ ┣ 📜.env.kind
  ┃ ┣ 📜.env.local
  ┃ ┣ 📜.env.prod
  ┃ ┣ 📜.env.staging
@@ -92,13 +116,15 @@ This project follows a monorepo structure with a clear and logical directory lay
  ┃ ┣ 📜package.json
  ┃ ┣ 📜phpstan.neon
  ┃ ┣ 📜phpunit.xml
- ┃ ┣ 📜Passport Toten Auth.postman_collection.json
+ ┃ ┗ 📜Passport Token Auth.postman_collection.json
  ┣ 📜.gitattributes
  ┣ 📜.gitignore
- ┣ 📜docker-compose.local.yml
- ┣ 📜docker-compose.prod.yml
- ┣ 📜docker-compose.staging.yml
- ┣ 📜docker-compose.yml
+ ┣ 📜docker-compose.dev.yml       # server-style image, baked config, local mysql
+ ┣ 📜docker-compose.kind.yml      # same, for testing the "kind" k8s overlay's image
+ ┣ 📜docker-compose.local.yml     # bind-mounted source, hot reload, local mysql
+ ┣ 📜docker-compose.prod.yml      # server-style image, external DB required
+ ┣ 📜docker-compose.staging.yml   # server-style image, external DB required
+ ┣ 📜docker-compose.yml           # ad-hoc local smoke-test stack
  ┗ 📜README.md
 ```
 
@@ -161,45 +187,38 @@ These routes require both a valid token and a specific role.
     cd [project-directory]
     ```
 
-2.  **Set up the environment:**
-    Use the appropriate `docker-compose` and `.env` file for your desired environment.
+2.  **Pick the compose file for what you're doing** — each one is standalone, run directly
+    with `-f`, no copying needed:
 
-    **For Local (Dev):**
+    | File | Use case |
+    | :--- | :--- |
+    | `docker-compose.local.yml` | **Day-to-day development.** Bind-mounted source, hot reload, `composer install`/`migrate` run automatically on boot. |
+    | `docker-compose.dev.yml` | Server-style baked image with a local mysql, for testing the "dev" build closer to how it deploys. |
+    | `docker-compose.kind.yml` | Same, matching what the `k8s/overlays/kind` cluster runs — see [its README](k8s/overlays/kind/README.md). |
+    | `docker-compose.staging.yml` / `docker-compose.prod.yml` | Server-style image, **no local mysql** — point them at a real database via env vars. |
+
+    For local development:
 
     ```bash
-    cp docker-compose.local.yml docker-compose.yml
-    cd src && cp .env.local .env
+    docker compose -f docker-compose.local.yml up -d --build
     ```
 
-    **For Staging:**
+3.  **Install Passport** (migrations already ran automatically for you):
 
     ```bash
-    cp docker-compose.staging.yml docker-compose.yml
-    cd src && cp .env.staging .env
-    ```
-
-    **For Production:**
-
-    ```bash
-    cp docker-compose.prod.yml docker-compose.yml
-    cd src && cp .env.prod .env
-    ```
-
-3.  **Build and run the Docker containers:**
-
-    ```bash
-    docker-compose up -d --build
-    ```
-
-4.  **Run migrations, seed the database, and install Passport:**
-
-    ```bash
-    docker-compose exec app php artisan migrate --seed
-    docker-compose exec app php artisan passport:keys --no-interaction
-    docker-compose exec app php artisan passport:client --personal --no-interaction
+    docker compose -f docker-compose.local.yml exec app php artisan passport:keys --no-interaction
+    docker compose -f docker-compose.local.yml exec app php artisan passport:client --personal --no-interaction
     ```
 
 The API will now be running and accessible at `http://localhost:8000`. 🎉
+
+-----
+
+## ☸️ Kubernetes (Local Testing)
+
+Want to run this app on a real local Kubernetes cluster instead of plain Docker Compose?
+See [`k8s/overlays/kind/README.md`](k8s/overlays/kind/README.md) for the full walkthrough —
+cluster setup, image loading, day-to-day commands, and a `k9s` cheat sheet.
 
 -----
 
@@ -224,13 +243,13 @@ To run the full test suite and code quality checks, execute the following comman
 To run the full test suite and check code coverage, execute the following command:
 
 ```bash
-docker-compose exec app vendor/bin/phpunit --testdox --coverage-html
+docker compose -f docker-compose.local.yml exec app vendor/bin/phpunit --testdox --coverage-html
 ```
 
 To generate an HTML report of the code coverage, which will be saved in the `src/coverage-html` directory, use this command:
 
 ```bash
-docker-compose exec app vendor/bin/phpunit --testdox --coverage-html=coverage-html
+docker compose -f docker-compose.local.yml exec app vendor/bin/phpunit --testdox --coverage-html=coverage-html
 ```
 To check coverage open `coverage-html/index.html` in a browser.
 
@@ -241,11 +260,11 @@ PHP-CS-Fixer checks and fixes code style to ensure PSR-12 compliance.
 
   * **Check for code style violations:**
     ```bash
-    docker-compose exec app vendor/bin/php-cs-fixer fix app --dry-run --diff --verbose
+    docker compose -f docker-compose.local.yml exec app vendor/bin/php-cs-fixer fix app --dry-run --diff --verbose
     ```
   * **Fix all code style violations:**
     ```bash
-    docker-compose exec app vendor/bin/php-cs-fixer fix app
+    docker compose -f docker-compose.local.yml exec app vendor/bin/php-cs-fixer fix app
     ```
 
 ### **Larastan (PHPStan)** 🧐
@@ -254,11 +273,11 @@ Larastan performs static analysis to find potential bugs and code smells.
 
   * **Run a full static analysis:**
     ```bash
-    docker-compose exec app vendor/bin/phpstan analyse
+    docker compose -f docker-compose.local.yml exec app vendor/bin/phpstan analyse
     ```
   * **Generate a baseline to ignore existing errors:**
     ```bash
-    docker-compose exec app vendor/bin/phpstan analyse --generate-baseline
+    docker compose -f docker-compose.local.yml exec app vendor/bin/phpstan analyse --generate-baseline
     ```
 
 -----

@@ -5,15 +5,23 @@ services:
       args:
         user: asif
         uid: 1412
+        env_file: .env.kind
       context: .
       dockerfile: /docker/php-fpm/Dockerfile
       target: server_deployment_php
+    image: passport_token_auth-app:latest
     volumes:
       - app_supervisor_logs:/var/www/storage/logs/supervisor
     expose:
       - "9000"
     environment:
       - APP_ENV=production
+      # .env.kind leaves these blank on purpose (see Dockerfile comment) — real values
+      # are supplied here, mirroring what the k8s Secret provides for the kind overlay.
+      - DB_PASSWORD=root
+      - APP_KEY=base64:gUOOhq/odpN93S5S7/+4w0xPvDkuvh2TTI+7QTPn+jI=
+      # Only compose sets this — k8s migrates once via its own initContainer instead.
+      - RUN_MIGRATIONS_ON_BOOT=true
     working_dir: /var/www/
     depends_on:
       mysql:

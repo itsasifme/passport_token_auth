@@ -6,6 +6,7 @@ spec:
   template:
     spec:
       initContainers:
+        - name: wait-for-mysql
         - name: run-migrations
           image: passport_token_auth-app:latest
       containers:

@@ -16,7 +16,7 @@ spec:
         - name: app
           env:
             - name: APP_ENV
-              value: production
+              value: staging
           volumeMounts:
             - mountPath: /var/www/.env
               name: app-env
@@ -26,5 +26,5 @@ spec:
           configMap:
             name: app-env
             items:
-              - key: .env.kind
+              - key: .env.staging
                 path: .env
