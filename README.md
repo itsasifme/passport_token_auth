@@ -2,7 +2,7 @@
     <h1>Laravel 12 API Auth System with Passport 🔑</h1>
 </div>
 
-This project is a robust API system built on **Laravel 12** that uses **Laravel Passport** for OAuth2 and personal access token-based authentication. It follows a monorepo folder structure 📂 and includes a comprehensive Docker setup 🐳 for **local (dev)**, **staging**, and **production** environments. The codebase is held to the highest standards, with **100% PSR-12** compliance ✅ and **100% test coverage** ✅ using PHPUnit 🧪.
+This project is a robust API system built on **Laravel 12** that uses **Laravel Passport** for OAuth2 and personal access token-based authentication. It follows a monorepo folder structure 📂 and includes a comprehensive Docker setup 🐳 for **local (dev)**, **staging**, and **production** environments, plus a **Kubernetes (Kustomize)** setup ☸️ — including a `kind` overlay for running the whole stack on a local cluster. A GitHub Actions pipeline gates every deploy on tests, code style, static analysis, and migration checks before building and pushing images. The codebase is held to the highest standards, with **100% PSR-12** compliance ✅ and **100% test coverage** ✅ using PHPUnit 🧪.
 
 -----
 
