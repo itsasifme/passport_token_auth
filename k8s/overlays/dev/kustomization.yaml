@@ -2,22 +2,22 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../base
-  - app-env-configmap.yaml
-  - app-secret.yaml
-  - app-hpa.yaml
-  - nginx-hpa.yaml
+- ../../base
+- app-env-configmap.yaml
+- app-secret.yaml
+- app-hpa.yaml
+- nginx-hpa.yaml
 
 images:
-  - name: passport_token_auth-app
-    newName: passport_token_auth-app
-    newTag: latest
-  - name: passport_token_auth-nginx
-    newName: passport_token_auth-nginx
-    newTag: latest
+- name: passport_token_auth-app
+  newName: ghcr.io/itsasifme/passport_token_auth-app
+  newTag: 0cfa252564748d333f86555c96cc706546f3ec7f
+- name: passport_token_auth-nginx
+  newName: ghcr.io/itsasifme/passport_token_auth-nginx
+  newTag: 0cfa252564748d333f86555c96cc706546f3ec7f
 
 patches:
-  - path: app-image-patch.yaml
-    target:
-      kind: Deployment
-      name: app
+- path: app-image-patch.yaml
+  target:
+    kind: Deployment
+    name: app
