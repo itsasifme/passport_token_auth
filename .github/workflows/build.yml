@@ -129,9 +129,15 @@ jobs:
         with:
           scan-type: 'config'
           scan-ref: 'docker/php-fpm/Dockerfile'
-          exit-code: '1'
+          # Only actually gate production — non-prod runs just print findings without failing,
+          # so they don't show up as confusing generic "exit code 1" annotations.
+          exit-code: ${{ steps.meta.outputs.app_env == 'production' && '1' || '0' }}
           severity: 'HIGH,CRITICAL'
-        continue-on-error: ${{ steps.meta.outputs.app_env != 'production' }}
+
+      - name: Report Dockerfile vulnerabilities
+        if: failure()
+        run: |
+          echo "::error title=Trivy: HIGH/CRITICAL findings in docker/php-fpm/Dockerfile::See the 'Run Trivy vulnerability scanner (base check)' step log above for the CVE list. This only blocks production deploys."
 
       - name: Build & push app image
         uses: docker/build-push-action@v6
@@ -163,18 +169,26 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.image_tag }}
           format: 'table'
-          exit-code: '1'
+          exit-code: ${{ steps.meta.outputs.app_env == 'production' && '1' || '0' }}
           severity: 'HIGH,CRITICAL'
-        continue-on-error: ${{ steps.meta.outputs.app_env != 'production' }}
+
+      - name: Report app image vulnerabilities
+        if: failure()
+        run: |
+          echo "::error title=Trivy: HIGH/CRITICAL vulnerabilities in app image::See the 'Scan app image for vulnerabilities' step log above for the CVE list. This only blocks production deploys — check the base PHP image / composer packages for available fixes."
 
       - name: Scan nginx image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.IMAGE_BASE }}-nginx:${{ steps.meta.outputs.image_tag }}
           format: 'table'
-          exit-code: '1'
+          exit-code: ${{ steps.meta.outputs.app_env == 'production' && '1' || '0' }}
           severity: 'HIGH,CRITICAL'
-        continue-on-error: ${{ steps.meta.outputs.app_env != 'production' }}
+
+      - name: Report nginx image vulnerabilities
+        if: failure()
+        run: |
+          echo "::error title=Trivy: HIGH/CRITICAL vulnerabilities in nginx image::See the 'Scan nginx image for vulnerabilities' step log above for the CVE list. This only blocks production deploys — check the base nginx image for available fixes."
 
       - name: Update image tag in kustomize overlay
         run: |
@@ -197,7 +211,9 @@ jobs:
           commit_user_name: github-actions[bot]
           commit_user_email: github-actions[bot]@users.noreply.github.com
           skip_dirty_check: false
-          branch: ${{ inputs.environment == 'production' && 'main' || (inputs.environment == 'staging' && 'staging' || 'dev') }}
+          # Commit back to whichever branch this run was triggered from — environment
+          # (which overlay gets the tag bump) and branch are independent choices.
+          branch: ${{ github.ref_name }}
 
       - name: Deployment summary
         run: |
@@ -217,4 +233,4 @@ jobs:
         if: steps.ref_info.outputs.ref_type == 'tag'
         run: |
           echo "ℹ️  Tag deployment: ${{ steps.ref_info.outputs.deploy_ref }}"
-          echo "   Kustomization committed to: ${{ inputs.environment == 'production' && 'main' || (inputs.environment == 'staging' && 'staging' || 'dev') }}"
+          echo "   Kustomization committed to: ${{ github.ref_name }}"

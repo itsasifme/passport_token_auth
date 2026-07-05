@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: passport-token-auth-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/engasifrahman/passport_token_auth.git
+    # main has the current manifest/Dockerfile fixes; build.yml commits its dev image-tag
+    # bump back to whatever branch triggered it (see build.yml), so run it from main too.
+    targetRevision: main
+    path: k8s/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: passport-token-auth-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
