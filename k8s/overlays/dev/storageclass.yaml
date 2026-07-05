@@ -1,0 +1,13 @@
+# EKS Auto Mode ships its own EBS CSI driver (ebs.csi.eks.amazonaws.com) with a working
+# node-level component, but no default StorageClass for it — this provides one.
+# The standard "Amazon EBS CSI Driver" add-on's node DaemonSet cannot schedule on Auto
+# Mode nodes at all (its pods lack the required toleration), so don't route through gp2/ebs.csi.aws.com.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: auto-ebs-sc
+provisioner: ebs.csi.eks.amazonaws.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+parameters:
+  type: gp3

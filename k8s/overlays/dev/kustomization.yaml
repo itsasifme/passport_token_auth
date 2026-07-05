@@ -7,6 +7,7 @@ resources:
 - app-secret.yaml
 - app-hpa.yaml
 - nginx-hpa.yaml
+- storageclass.yaml
 
 images:
 - name: passport_token_auth-app
@@ -21,6 +22,7 @@ patches:
   target:
     kind: Deployment
     name: app
-# EKS has no default StorageClass — pin both PVCs to the one that actually exists (gp2).
+# EKS Auto Mode's gp2 (ebs.csi.aws.com) can't actually provision here — its node
+# component can't schedule on Auto Mode nodes. Use the working auto-ebs-sc instead.
 # No target: needed here — each document in the file is matched to its base PVC by name.
 - path: pvc-storageclass-patch.yaml

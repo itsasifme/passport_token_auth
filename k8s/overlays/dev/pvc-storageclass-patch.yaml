@@ -3,11 +3,11 @@ kind: PersistentVolumeClaim
 metadata:
   name: app-supervisor-logs
 spec:
-  storageClassName: gp2
+  storageClassName: auto-ebs-sc
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mysql-data
 spec:
-  storageClassName: gp2
+  storageClassName: auto-ebs-sc
