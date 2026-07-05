@@ -12,17 +12,17 @@ resources:
 images:
 - name: passport_token_auth-app
   newName: ghcr.io/itsasifme/passport_token_auth-app
-  newTag: cc6e50f91a3da52ac6ccea40d957dcf3c29c510f
+  newTag: 415b00c12330b781fdb0d3eaefa72d6755ceb370
 - name: passport_token_auth-nginx
   newName: ghcr.io/itsasifme/passport_token_auth-nginx
-  newTag: cc6e50f91a3da52ac6ccea40d957dcf3c29c510f
+  newTag: 415b00c12330b781fdb0d3eaefa72d6755ceb370
 
+# EKS Auto Mode's gp2 (ebs.csi.aws.com) can't actually provision here — its node
+# component can't schedule on Auto Mode nodes. Use the working auto-ebs-sc instead.
 patches:
 - path: app-image-patch.yaml
   target:
     kind: Deployment
     name: app
-# EKS Auto Mode's gp2 (ebs.csi.aws.com) can't actually provision here — its node
-# component can't schedule on Auto Mode nodes. Use the working auto-ebs-sc instead.
 - path: app-supervisor-logs-storageclass-patch.yaml
 - path: mysql-data-storageclass-patch.yaml
