@@ -4,10 +4,3 @@ metadata:
   name: app-supervisor-logs
 spec:
   storageClassName: auto-ebs-sc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mysql-data
-spec:
-  storageClassName: auto-ebs-sc
