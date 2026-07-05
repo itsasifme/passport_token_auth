@@ -75,12 +75,11 @@ COPY ./docker/php-fpm/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Pre-create the supervisor log directory and fix ownership.
-# The non-root user must be able to write here at runtime.
-# /var/www itself is also chowned here: WORKDIR created it as root, and the
-# non-root user needs write access to it directly (e.g. to create vendor/ via composer install).
+# Recursive from /var/www down: WORKDIR created it as root, and mkdir -p here creates
+# storage/logs and storage/logs/supervisor as root too. Cheap at this point since the
+# app source isn't copied in until the next stage — nothing to chown yet but this tree.
 RUN mkdir -p /var/www/storage/logs/supervisor \
-    && chown "$user":"$user" /var/www \
-    && chown -R "$user":"$user" /var/www/storage/logs/supervisor \
+    && chown -R "$user":"$user" /var/www \
     && chown -R "$user":"$user" /usr/local/etc/php/conf.d
 
 # Switch to non-root user. All subsequent RUN/CMD/ENTRYPOINT run as this user.
