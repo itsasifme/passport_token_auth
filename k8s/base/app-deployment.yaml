@@ -15,6 +15,11 @@ spec:
       labels:
         app: app
     spec:
+      # Fresh PersistentVolumes (e.g. real cloud block storage like EBS) mount as
+      # root:root by default. fsGroup makes Kubernetes set group ownership on mounted
+      # volumes to match the app user (asif, gid 1412), so it can write its own logs.
+      securityContext:
+        fsGroup: 1412
       initContainers:
         - name: wait-for-mysql
           image: busybox:1.36
