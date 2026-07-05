@@ -21,3 +21,6 @@ patches:
     target:
       kind: Deployment
       name: app
+  # EKS has no default StorageClass — pin both PVCs to the one that actually exists (gp2).
+  # No target: needed here — each document in the file is matched to its base PVC by name.
+  - path: pvc-storageclass-patch.yaml
